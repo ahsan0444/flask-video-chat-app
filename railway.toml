@@ -1,0 +1,13 @@
+# railway.toml
+
+[project]
+name = "flask-video-chat-app"
+
+[build]
+command = "pip install -r requirements.txt"
+
+[deploy]
+command = "python app.py"
+
+[dev]
+command = "python app.py"
