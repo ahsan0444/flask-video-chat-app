@@ -63,6 +63,10 @@ def generate_response_with_context(client, model_name, user_question, relevant_e
     response = conversation_chain.predict(human_input=combined_query)
     return response
 
+@app.route("/")
+def index():
+    return "Welcome to flask Web App"
+
 @app.route('/vectorize', methods=['POST'])
 def vectorize_video():
     """Endpoint to vectorize a video URL and store it in Pinecone."""
