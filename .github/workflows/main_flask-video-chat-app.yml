@@ -10,6 +10,11 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  AZURE_WEBAPP_NAME: flask-video-chat-app
+  AZURE_WEBAPP_PACKAGE_PATH: '.'      # set this to the path to your web app project, defaults to the repository root
+
+  
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -70,9 +75,8 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B0663ADF5FBA4DC8A9599E7A79BECB8A }}
 
       - name: 'Deploy to Azure Web App'
-        uses: Azure/webapps-deploy@v3.0.1
-        id: deploy-to-webapp
-        with:
-          app-name: 'flask-video-chat-app'
-          slot-name: 'Production'
-          package: '.'          
+        uses: azure/webapps-deploy@v3
+        with: 
+          app-name: ${{ env.AZURE_WEBAPP_NAME }} # Replace with your app name
+          package: '${{ env.AZURE_WEBAPP_PACKAGE_PATH }}/flask-video-chat-app'
+           
