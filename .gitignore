@@ -123,6 +123,9 @@ celerybeat.pid
 
 # Environments
 .env
+.appenv
+.vscode
+.github
 .venv
 env/
 flaskenv/
