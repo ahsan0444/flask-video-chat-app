@@ -70,7 +70,7 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B0663ADF5FBA4DC8A9599E7A79BECB8A }}
 
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v3
+        uses: Azure/webapps-deploy@v3.0.1
         id: deploy-to-webapp
         with:
           app-name: 'flask-video-chat-app'
