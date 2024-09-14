@@ -2,7 +2,7 @@ name: Build and deploy Python app to Azure Web App
 
 env:
   AZURE_WEBAPP_NAME: flask-video-chat-app
-  PYTHON_VERSION: '3.12.3'
+  PYTHON_VERSION: '3.8'
 
 on:
   push:
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v3.0.0
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }
           cache: 'pip'
 
       - name: Create and start virtual environment
