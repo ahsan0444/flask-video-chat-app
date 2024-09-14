@@ -1,8 +1,8 @@
 name: Build and deploy Python app to Azure Web App
 
 env:
-  AZURE_WEBAPP_NAME: flask-video-chat-app  # Update with your Azure App name
-  PYTHON_VERSION: '3.8'
+  AZURE_WEBAPP_NAME: flask-video-chat-app  # Update with your Azure Web App name
+  PYTHON_VERSION: '3.12.3'
 
 on:
   push:
