@@ -22,8 +22,10 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
+          client-id: "31a258cc-14e3-4f75-9415-59da6d1743e1" 
+          subscription-id: "d0bc466c-6f3c-4967-bbec-6fb387acbd79"
+          tenant-id: "99e8d75b-6d86-4836-ba73-850815d8e58d"
+          
       - name: Set up Python version
         uses: actions/setup-python@v3.0.0
         with:
