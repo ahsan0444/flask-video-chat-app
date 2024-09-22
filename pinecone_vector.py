@@ -3,7 +3,6 @@ import time
 import json
 from pinecone import Pinecone, ServerlessSpec
 from dotenv import load_dotenv
-from transcription import process_videos_from_file
 
 # Load environment variables from .env file
 load_dotenv()
@@ -11,25 +10,24 @@ load_dotenv()
 # Retrieve the Pinecone API key from environment variables
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
 
-
 def initialize_pinecone_index():
-
+    """Initialize Pinecone index."""
     # Initialize Pinecone with the API key
     pc = Pinecone(api_key=pinecone_api_key)
     index_name = "youtube-transcripts"
 
-    # Check if the index exists, if not, create it
+    # Check if the index exists; if not, create it
     if index_name not in pc.list_indexes().names():
         pc.create_index(
             name=index_name,
-            dimension=512,  # Match this with your vector dimension
+            dimension= 1536,  # Match this with your vector dimension
             metric="cosine",
             spec=ServerlessSpec(
                 cloud='aws', 
                 region='us-east-1'
             ) 
         )
-        # wait for index to be initialized
+        # Wait for the index to be initialized
         time.sleep(1)
 
     index = pc.Index(index_name)
@@ -37,13 +35,22 @@ def initialize_pinecone_index():
     return index
 
 def upsert_to_pinecone(index, tokenized_chunks, video_id):
-    """Upsert tokenized chunks into Pinecone using video ID as the ID."""
-    vectors_with_ids = [
-        (f"{video_id}_{i}", chunk['input_ids'], chunk['metadata'])
-        for i, chunk in enumerate(tokenized_chunks)
-    ]
-    index.upsert(vectors_with_ids)
-    print(f"Upserted {len(tokenized_chunks)} chunks to Pinecone")
+    vectors_with_ids = []
+    for i, chunk in enumerate(tokenized_chunks):
+        if 'embedding' in chunk and 'metadata' in chunk and 'text' in chunk:  # Ensure 'text' is present
+            vectors_with_ids.append((
+                f"{video_id}_{i}",
+                chunk['embedding'],
+                {
+                    'text': chunk['text'],
+                    **chunk['metadata']
+                }
+            ))
+    if vectors_with_ids:
+        index.upsert(vectors_with_ids)
+        print(f"Upserted {len(vectors_with_ids)} chunks to Pinecone")
+    else:
+        print("No valid vectors to upsert.")
 
 def update_video_status(file_path, video_id):
     """Update the video vectorization status in the JSON file."""

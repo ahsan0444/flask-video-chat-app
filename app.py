@@ -1,16 +1,16 @@
 import os
+import json
 from flask import Flask, request, jsonify
-from langchain.chains import LLMChain
 from langchain_core.prompts import (
     ChatPromptTemplate,
-    HumanMessagePromptTemplate,
-    MessagesPlaceholder,
+    HumanMessagePromptTemplate
 )
 from langchain_core.messages import SystemMessage
 from groq import Groq
 from langchain_pinecone import PineconeVectorStore
-from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 import pinecone_vector
+import transcription
+from azure_embeddings import generate_embeddings
 
 app = Flask(__name__)
 
@@ -24,76 +24,154 @@ def initialize_groq_client():
 
 groq_client = initialize_groq_client()
 
+system_prompt = '''
+    You are a Q&A bot. Given the user's question and relevant excerpts from the content, answer the question by including direct quotes from the excerpts. If the information cannot be found, respond with "I don't know."
+'''
+
+prompt = ChatPromptTemplate.from_messages(
+    [
+        SystemMessage(content=system_prompt),
+        HumanMessagePromptTemplate.from_template("{human_input}")
+    ]
+)
+
+# Custom embedding class for Azure OpenAI
+class AzureEmbeddingFunction:
+    def embed_query(self, text):
+        """Generate embeddings for a single query."""
+        return generate_embeddings(text)
+
+    def embed(self, texts):
+        """Generate embeddings for a list of texts."""
+        return [self.embed_query(text) for text in texts if text]  # Filter out empty strings
+
 # Initialize Pinecone vector store
 def initialize_pinecone_vector_store():
     pinecone_api_key = os.getenv('PINECONE_API_KEY')
     pinecone_index_name = "youtube-transcripts"
-    embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+    
+    embedding_function = AzureEmbeddingFunction()
+    
     return PineconeVectorStore(index_name=pinecone_index_name, embedding=embedding_function)
 
+# Initialize the vector store
 pinecone_vector_store = initialize_pinecone_vector_store()
 
 def get_relevant_excerpts(user_question, vector_store):
     """Retrieve the most relevant excerpts from Pinecone based on the user's question."""
+    if not user_question:  # Check for empty question
+        print("No question provided.")
+        return ""  # Return empty string if no question is provided
+    
+    # Perform similarity search with the embedded question
     relevant_docs = vector_store.similarity_search(user_question)
-    relevant_excerpts = '\n\n---\n\n'.join([doc.page_content for doc in relevant_docs[:3]])
-    return relevant_excerpts
 
-def generate_response_with_context(client, model_name, user_question, relevant_excerpts):
-    """Generate a response to the user's question using Groq and relevant excerpts."""
-    system_prompt = '''
-    You are a Q&A bot. Given the user's question and relevant excerpts from the content, answer the question by including direct quotes from the excerpts. If the information cannot be found, respond with "I don't know."
-    '''
+    # Extract the page_content from all relevant documents
+    relevant_excerpts = [doc.page_content for doc in relevant_docs]  # No limit on the number of documents
+
+    return '\n\n---\n\n'.join(relevant_excerpts)
+
+
+def generate_response_with_groq(client, model_name, combined_query):
+    """Generate a response using the Groq API."""
     
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessagePromptTemplate.from_template("{human_input}")
-        ]
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {"role": "user", "content": combined_query}
+        ],
+        model=model_name
     )
-
-    conversation_chain = LLMChain(
-        llm=client,
-        prompt=prompt,
-        verbose=False
-    )
-
-    combined_query = f"User Question: {user_question}\n\nRelevant Excerpt(s):\n\n{relevant_excerpts}"
     
-    response = conversation_chain.predict(human_input=combined_query)
+    # Extract the response from the Groq API
+    response = chat_completion.choices[0].message.content
     return response
 
-@app.route("/")
-def index():
-    return "Welcome to flask Web App"
-
-@app.route('/vectorize', methods=['POST'])
+@app.route("/vectorize", methods=['POST', 'GET'])
 def vectorize_video():
     """Endpoint to vectorize a video URL and store it in Pinecone."""
-    request_data = request.json
-    video_url = request_data['video_url']
     
-    video_id, tokenized_chunks = next(pinecone_vector.process_videos_from_file('video_store.json'))
+    video_url = None
+    if request.method == 'POST':
+        if request.content_type == 'application/json':
+            request_data = request.json
+            video_url = request_data.get('video_url')
+        else:
+            return jsonify({"error": "Content-Type must be 'application/json' for POST requests"}), 400
+    
+    elif request.method == 'GET':
+        video_url = request.args.get('video_url')
 
-    if tokenized_chunks:
-        pinecone_vector.upsert_to_pinecone(pinecone_index, tokenized_chunks, video_id)
-        pinecone_vector.update_video_status('video_store.json', video_id)
-        return jsonify({"message": f"Video {video_url} vectorized and stored in Pinecone."})
+    if not video_url:
+        return jsonify({"error": "No video URL provided"}), 400
+
+    with open('video_store.json', 'r') as f:
+        video_data = json.load(f)
+
+    existing_video = next((video for video in video_data if video['video_url'] == video_url), None)
+    
+    if existing_video:
+        if existing_video['vectorized']:
+            return jsonify({"message": f"Video {video_url} is already vectorized."}), 200
+        else:
+            try:
+                video_id = video_url.split('v=')[-1]
+                transcript = transcription.get_transcript(video_id)
+                
+                if transcript:
+                    tokenized_chunks = transcription.tokenize_text(transcript, video_url=video_url)
+                    pinecone_vector.upsert_to_pinecone(pinecone_index, tokenized_chunks, video_id)
+
+                    existing_video['vectorized'] = True
+                    with open('video_store.json', 'w') as f:
+                        json.dump(video_data, f, indent=4)
+
+                    return jsonify({"message": f"Video {video_url} has been vectorized and updated."}), 200
+                else:
+                    return jsonify({"error": "Transcript not available for video."}), 400
+            except StopIteration:
+                return jsonify({"error": "Failed to vectorize video."}), 400
     else:
-        return jsonify({"message": f"Failed to vectorize video {video_url}."}), 400
+        try:
+            video_id = video_url.split('v=')[-1]
+            transcript = transcription.get_transcript(video_id)
 
-@app.route('/ask_question', methods=['POST'])
+            if transcript:
+                tokenized_chunks = transcription.tokenize_text(transcript, video_url=video_url)
+
+                pinecone_vector.upsert_to_pinecone(pinecone_index, tokenized_chunks, video_id)
+
+                new_video = {"video_url": video_url, "vectorized": True}
+                video_data.append(new_video)
+
+                with open('video_store.json', 'w') as f:
+                    json.dump(video_data, f, indent=4)
+
+                return jsonify({"message": f"Video {video_url} vectorized and added to the store."}), 200
+            else:
+                return jsonify({"error": "Transcript not available for video."}), 400
+        except StopIteration:
+            return jsonify({"error": "Failed to vectorize new video."}), 400
+
+@app.route('/ask_question', methods=['POST', 'GET'])
 def ask_question():
     """Endpoint to answer a question using Groq and Pinecone."""
-    request_data = request.json
-    user_question = request_data['question']
+    user_question = None
+    if request.method == 'POST':
+        request_data = request.json
+        user_question = request_data.get('question')
+    elif request.method == 'GET':
+        user_question = request.args.get('question')
 
-    # Get relevant excerpts from Pinecone
     relevant_excerpts = get_relevant_excerpts(user_question, pinecone_vector_store)
+    
+    if not relevant_excerpts:  # Check if there are no relevant excerpts
+        return jsonify({"response": "No relevant data found."}), 404  # Suitable message with a 404 status
 
-    # Generate a response using Groq
     model_name = 'llama3-8b-8192'
-    response = generate_response_with_context(groq_client, model_name, user_question, relevant_excerpts)
+    combined_query = f"User Question: {user_question}\n\nRelevant Excerpt(s):\n\n{relevant_excerpts}"
+    
+    # Generate a response using Groq
+    response = generate_response_with_groq(groq_client, model_name, combined_query)
 
     return jsonify({"response": response, "context": relevant_excerpts})
 
