@@ -78,6 +78,6 @@ jobs:
         uses: azure/webapps-deploy@v3
         with: 
          app-name: ${{ env.AZURE_WEBAPP_NAME }} # Replace with your app name
-         package: './release.zip'  # Deploy the zip file directly
+         package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}  # Deploy the zip file directly
 
            
